@@ -12,7 +12,17 @@ if not controller then
     os.exit()
 end
 
-local function save_file(task_list)
+local function save_file(item, task_list)
+    local new_item = {
+        display_name = item.display_name,
+        label = item.label,
+        damage = item.damage,
+        count = item.count,
+        fluid_name = item.fluid_name,
+        priority = item.priority
+    }
+
+    task_list[item.item_key] = new_item
     out = serialization.serialize(task_list)
 
     local _file = io.open("task_list", "w")
@@ -20,43 +30,9 @@ local function save_file(task_list)
     _file:close()
 end
 
-local function getItemsFromInventory()
-    local items = {}
-
-    for _, item in pairs(controller.getAllStacks(chest_side).getAll()) do
-        if item.name ~= nil then
-            local fullename = item.name .. ":" .. item.damage .. "->" .. tostring(item.fluid_name)
-            items[fullename] = item
-            term.write(".")
-        end
-    end
-
-    return items
-end
-
-local function question(text, answer_type)
-    term.write(text)
-
-    while true do
-        local answer = io.read()
-        if answer_type == "boolean" and (answer == "Y" or answer == "y" or answer == "") then
-            return true
-        elseif answer_type == "boolean" and (answer == "N" or answer == "n") then
-            return false
-        elseif answer_type == "integer" and (nil ~= tonumber(answer) and tonumber(answer) > 0) then
-            return tonumber(answer)
-        else
-            local _, row = term.getCursor()
-            term.setCursor(1, row - 1)
-            term.clearLine()
-            term.write(text)
-        end
-    end
-end
-
-local function add_to_file(item)
+local function load_file()
     local _file = io.open("task_list", "r")
-    local is_was_in_file = false
+    local task_list
 
     if _file == nil then
         task_list = {}
@@ -64,90 +40,134 @@ local function add_to_file(item)
         task_list = serialization.unserialize(_file:read())
         _file:close()
     end
+    return task_list
+end
 
-    local item_key = ""
-    if item.fluid_name == nil then
-        item_key = item.name .. ":" .. item.damage
-    else
-        item_key = item.name .. ":" .. item.damage .. "->" .. item.fluid_name
+local function delete_from_file(item_key, task_list)
+    task_list[item_key] = nil
+    out = serialization.serialize(task_list)
+
+    local _file = io.open("task_list", "w")
+    _file:write(out)
+    _file:close()
+end
+
+local function question(text, answer_type, _start, _end)
+    term.write(text)
+    if _start == nil then
+        _start = 1
+    end
+    if _end == nil then
+        _end = 9999999
     end
 
-    if task_list[item_key] ~= nil then
-        is_was_in_file = true
-        local what_do =
-            question(
-            " Предмет уже есть в списке: " ..
-                task_list[item_key]["display_name"] .. "\n  #1-> Изменить\n  #2-> Удалить\n  #3-> Пропустить\n  ->",
-            "integer"
-        )
-        if what_do == 2 then
-            task_list[item_key] = nil
-            save_file(task_list)
-            return
-        elseif what_do == 3 then
-            return
+    while true do
+        local answer = io.read()
+        if answer_type == "boolean" and (answer == "Y" or answer == "y" or answer == "") then
+            return true
+        elseif answer_type == "boolean" and (answer == "N" or answer == "n") then
+            return false
+        elseif
+            answer_type == "integer" and
+                (nil ~= tonumber(answer) and tonumber(answer) >= _start and tonumber(answer) <= _end)
+         then
+            return tonumber(answer)
+        else
+            local _, row = term.getCursor()
+
+            delete_lines = select(2, string.gsub(text, "\n", "")) + 1
+            for i = 0, delete_lines do
+                term.setCursor(1, row - i)
+                term.clearLine()
+            end
+            term.write(text)
         end
     end
+end
 
-    local display_name
-    local count
+local function item_in_task_list(item, task_list)
+    item["display_name"] = task_list[item.item_key].display_name
+    item["count"] = task_list[item.item_key].count
+    item["priority"] = task_list[item.item_key].priority
 
-    if is_was_in_file then
-        term.write("\n Оставить это имя? -> '" .. task_list[item_key]["display_name"] .. "' : ")
-        display_name = io.read()
-        if display_name == "" then
-            display_name = task_list[item_key]["display_name"]
-        end
-        count = question(" Укажите кол-во (было " .. task_list[item_key]["count"] .. "): ", "integer")
-        priority =
-            question(
-            " Какой приоритет? (Был " ..
-                task_list[item_key]["priority"] ..
-                    ")\n #1-> Запуск если есть редстоун сигнал\n #2-> Игнорировать редстоун сигнал\n #3-> Беcконечно, но с редстоун сигналом\n #4-> Беcконечно и игнорировать редстоун сигнал\n ->",
-            "integer"
-        )
-    else
-        term.write("\n Оставить это имя? -> '" .. item.label .. "' : ")
-        display_name = io.read()
-        if display_name == "" then
-            display_name = item.label
-            print("asd")
-        end
-        count = question(" Укажите кол-во: ", "integer")
-        priority =
-            question(
-            " Какой приоритет?\n #1-> Запуск если есть редстоун сигнал\n #2-> Игнорировать редстоун сигнал\n #3-> Беcконечно, но с редстоун сигналом\n #4-> Беcконечно и игнорировать редстоун сигнал\n ->",
-            "integer"
-        )
+    local what_do =
+        question(
+        " #" ..
+            item.slot ..
+                " Предмет уже есть в списке: " ..
+                    item.display_name ..
+                        "( " .. item.count .. "шт. )" .. "\n  #1-> Изменить\n  #2-> Удалить\n  #3-> Пропустить\n  ->",
+        "integer"
+    )
+    if what_do == 2 then
+        delete_from_file(item.item_key, task_list)
+        return
+    elseif what_do == 3 then
+        return
     end
 
-    local new_item = {
-        display_name = display_name,
-        label = item.label,
-        damage = item.damage,
-        count = count,
-        fluid_name = item.fluid_name,
-        priority = priority
-    }
-
-    task_list[item_key] = new_item
-    save_file(task_list)
-
-    if is_was_in_file then
-        print("Изменено :Р")
-    else
-        print("Добавлено :)")
+    term.write("\n #" .. item.slot .. " Оставить это имя? -> '" .. item["display_name"] .. "' : ")
+    item["display_name"] = io.read()
+    if item["display_name"] == "" then
+        item["display_name"] = item["display_name"]
     end
+
+    item["count"] = question(" Укажите кол-во (было " .. item["count"] .. "): ", "integer")
+
+    item["priority"] =
+        question(
+        " Какой приоритет? (Был " ..
+            item["priority"] ..
+                ")\n #1-> Запуск если есть редстоун сигнал\n #2-> Игнорировать редстоун сигнал\n #3-> Беcконечно, но с редстоун сигналом\n #4-> Беcконечно и игнорировать редстоун сигнал\n #5-> Высокий приоритет с сигналом\n #6-> Высокий приоритет без сигнала\n ->",
+        "integer",
+        1,
+        6
+    )
+    save_file(item, task_list)
+    print("Изменено :Р")
+    return
+end
+
+local function add_to_file(item)
+    local task_list = load_file()
+
+    item["item_key"] = item.name .. ":" .. item.damage .. "->" .. tostring(item.fluid_name)
+
+    --check in task_list
+    if task_list[item["item_key"]] ~= nil then
+        item_in_task_list(item, task_list)
+        return
+    end
+
+    term.write("\n #" .. item.slot .. " Оставить это имя? -> '" .. item.label .. "' : ")
+    item["display_name"] = io.read()
+    if item["display_name"] == "" then
+        item["display_name"] = item.label
+    end
+    item["count"] = question(" Укажите кол-во: ", "integer")
+    item["priority"] =
+        question(
+        " Какой приоритет?\n #1-> Запуск если есть редстоун сигнал\n #2-> Игнорировать редстоун сигнал\n #3-> Беcконечно, но с редстоун сигналом\n #4-> Беcконечно и игнорировать редстоун сигнал\n #5-> Высокий приоритет с сигналом\n #6-> Высокий приоритет без сигнала\n ->",
+        "integer",
+        1,
+        6
+    )
+
+    save_file(item, task_list)
+    print("Добавлено :)")
 end
 
 local function main()
     term.clear()
     term.write("Скрипт добавления предметов в планировщик\n")
 
-    items = getItemsFromInventory()
+    local items = controller.getAllStacks(chest_side).getAll()
 
-    for slotIndex, item in pairs(items) do
-        add_to_file(item)
+    for slot, item in pairs(items) do
+        item["slot"] = slot + 1
+        if item.damage ~= nil then
+            add_to_file(item)
+        end
     end
 end
 
